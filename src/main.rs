@@ -56,6 +56,7 @@ fn main() {
     App::build()
         .add_plugins(DefaultPlugins)
         .init_resource::<ButtonMaterials>()
+        .init_resource::<BackGroundMusicResources>()
         .add_state(AppState::Menu)
         .insert_resource(Screen(screen))
         .insert_resource(Block {
@@ -74,11 +75,15 @@ fn main() {
         .insert_resource(Scoreboard { score: 0 })
         .insert_resource(ClearColor(Color::rgb(0.9, 0.9, 0.9)))
         .add_startup_system(setup.system())
+        .add_startup_system(bgm_first_play_system.system())
+        .insert_resource(BgmTimer(Timer::from_seconds(71.0, true)))
+        .add_system(bgm_play_system.system())
         .add_system_set(SystemSet::on_enter(AppState::Menu).with_system(setup_menu.system()))
         .add_system_set(SystemSet::on_update(AppState::Menu).with_system(menu.system()))
         .add_system_set(SystemSet::on_exit(AppState::Menu).with_system(cleanup_menu.system()))
         .add_system_set(
-            SystemSet::on_enter(AppState::GameOver).with_system(setup_over_menu.system()),
+            SystemSet::on_enter(AppState::GameOver)
+                .with_system(setup_over_menu.system()),
         )
         .add_system_set(SystemSet::on_update(AppState::GameOver).with_system(over_menu.system()))
         .add_system_set(
@@ -144,6 +149,25 @@ enum AppState {
 
 struct MenuData {
     button_entity: Entity,
+}
+
+fn bgm_first_play_system(    
+    audio: Res<Audio>,
+    bgm_audio: Res<BackGroundMusicResources>  
+) {
+    audio.play(bgm_audio.0.clone());
+}
+
+struct BgmTimer(Timer);
+fn bgm_play_system(    
+    time: Res<Time>,
+    mut timer: ResMut<BgmTimer>,
+    audio: Res<Audio>,
+    bgm_audio: Res<BackGroundMusicResources>
+) {
+    if timer.0.tick(time.delta()).just_finished() {
+        audio.play(bgm_audio.0.clone());
+    }
 }
 
 fn setup(
@@ -698,23 +722,6 @@ fn speed_adjustment_system(scoreboard: Res<Scoreboard>, mut speed: ResMut<Speed>
     speed.0 += (scoreboard.score / 200) as f32;
 }
 
-struct ButtonMaterials {
-    normal: Handle<ColorMaterial>,
-    hovered: Handle<ColorMaterial>,
-    pressed: Handle<ColorMaterial>,
-}
-
-impl FromWorld for ButtonMaterials {
-    fn from_world(world: &mut World) -> Self {
-        let mut materials = world.get_resource_mut::<Assets<ColorMaterial>>().unwrap();
-        ButtonMaterials {
-            normal: materials.add(Color::rgb(0.15, 0.15, 0.15).into()),
-            hovered: materials.add(Color::rgb(0.25, 0.25, 0.25).into()),
-            pressed: materials.add(Color::rgb(0.35, 0.75, 0.35).into()),
-        }
-    }
-}
-
 struct OverMenuData {
     button_entity: Entity,
 }
@@ -812,4 +819,31 @@ fn clear_game(
     let shape_id = rng.gen_range(0..4);
     next_block.type_id = type_id;
     next_block.shape_id = shape_id;
+}
+
+struct ButtonMaterials {
+    normal: Handle<ColorMaterial>,
+    hovered: Handle<ColorMaterial>,
+    pressed: Handle<ColorMaterial>,
+}
+
+impl FromWorld for ButtonMaterials {
+    fn from_world(world: &mut World) -> Self {
+        let mut materials = world.get_resource_mut::<Assets<ColorMaterial>>().unwrap();
+        ButtonMaterials {
+            normal: materials.add(Color::rgb(0.15, 0.15, 0.15).into()),
+            hovered: materials.add(Color::rgb(0.25, 0.25, 0.25).into()),
+            pressed: materials.add(Color::rgb(0.35, 0.75, 0.35).into()),
+        }
+    }
+}
+
+struct BackGroundMusicResources(Handle<AudioSource>);
+
+impl FromWorld for BackGroundMusicResources {
+    fn from_world(world: &mut World) -> Self {
+        let asset_server = world.get_resource_mut::<AssetServer>().unwrap();
+        let audio = asset_server.load("bgm/default.mp3");
+        Self(audio)
+    }
 }
