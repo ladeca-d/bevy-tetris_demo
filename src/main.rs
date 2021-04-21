@@ -57,18 +57,20 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .init_resource::<ButtonMaterials>()
         .add_state(AppState::Menu)
-        .insert_resource(BlockMoveTimer(Timer::from_seconds(1.0 / 11.0, true)))
         .insert_resource(Screen(screen))
         .insert_resource(Block {
             exists: false,
             i: 6,
             j: 6,
+            velocity_x: 1.0,
+            velocity_y: 1.0,
+            real_x: 6.0,
             real_y: 6.0,
             type_id: 1,
             shape_id: 1,
         })
         .insert_resource(next_block)
-        .insert_resource(Speed(5.0))
+        .insert_resource(Speed(2.0))
         .insert_resource(Scoreboard { score: 0 })
         .insert_resource(ClearColor(Color::rgb(0.9, 0.9, 0.9)))
         .add_startup_system(setup.system())
@@ -87,12 +89,14 @@ fn main() {
         .add_system_set(
             SystemSet::on_update(AppState::InGame)
                 .with_system(block_spawn_system.system())
+                .with_system(block_drop_speed_adjustment_system.system())
                 .with_system(block_drop_system.system())
                 .with_system(judge_system.system())
                 .with_system(block_movement_system.system())
                 .with_system(block_transformation_system.system())
-                .with_system(scoreboard_system.system())
                 .with_system(render_system.system())
+                .with_system(scoreboard_system.system())
+                .with_system(speed_adjustment_system.system())
                 .with_system(pause_system.system()),
         )
         .run();
@@ -109,6 +113,9 @@ struct Block {
     exists: bool,
     i: usize,
     j: usize,
+    velocity_x: f32,
+    velocity_y: f32,
+    real_x: f32,
     real_y: f32,
     type_id: usize,
     shape_id: usize,
@@ -400,8 +407,6 @@ fn cleanup_menu(mut commands: Commands, menu_data: Res<MenuData>) {
     commands.entity(menu_data.button_entity).despawn_recursive();
 }
 
-struct BlockMoveTimer(Timer);
-
 fn block_spawn_system(mut block: ResMut<Block>, mut next_block: ResMut<NextBlock>) {
     if !block.exists {
         // change block id
@@ -437,9 +442,25 @@ fn block_spawn_system(mut block: ResMut<Block>, mut next_block: ResMut<NextBlock
 
         block.i = 3 + 1 - height;
         block.j = 3 + 4;
+        block.velocity_x = 1.0;
+        block.velocity_y = 1.0;
+        block.real_x = block.j as f32;
         block.real_y = block.i as f32;
 
         block.exists = true;
+    }
+}
+
+fn block_drop_speed_adjustment_system(
+    time: Res<Time>,
+    keyboard_input: Res<Input<KeyCode>>,
+    mut block: ResMut<Block>,
+) {
+    if keyboard_input.pressed(KeyCode::Down) {
+        let delta_seconds = time.delta_seconds();
+        block.velocity_y *= 1.0 + 3.0 * delta_seconds;
+    } else {
+        block.velocity_y = 1.0;
     }
 }
 
@@ -450,18 +471,17 @@ fn block_drop_system(
     mut block: ResMut<Block>,
     mut state: ResMut<State<AppState>>,
 ) {
-    let delta_seconds = f32::min(0.2, time.delta_seconds());
+    let delta_seconds = time.delta_seconds();
 
-    block.real_y += speed.0 * delta_seconds;
+    block.real_y += speed.0 * block.velocity_y * delta_seconds;
     let new_i = (block.real_y * 1.01) as usize;
-    let new_j = block.j;
 
     // check if the move successes
     let block_matrix = BLOCKSLIB[block.type_id][block.shape_id];
     let mut if_drop = true;
     for i in 0..4 {
         for j in 0..4 {
-            if block_matrix[i][j] == 1 && (screen.0)[new_i + i][new_j + j] == 1 {
+            if block_matrix[i][j] == 1 && (screen.0)[new_i + i][block.j + j] == 1 {
                 if_drop = false;
                 break;
             }
@@ -474,7 +494,6 @@ fn block_drop_system(
     // drop if it is possible
     if if_drop {
         block.i = new_i;
-        block.j = new_j;
     } else {
         for i in 0..4 {
             for j in 0..4 {
@@ -542,48 +561,51 @@ fn judge_system(mut scoreboard: ResMut<Scoreboard>, mut screen: ResMut<Screen>) 
 
 fn block_movement_system(
     time: Res<Time>,
-    mut timer: ResMut<BlockMoveTimer>,
     keyboard_input: Res<Input<KeyCode>>,
     screen: Res<Screen>,
     mut block: ResMut<Block>,
 ) {
-    if block.exists {
-        if timer.0.tick(time.delta()).just_finished() {
-            let new_i = block.i;
-            let mut new_j = block.j;
-            if keyboard_input.pressed(KeyCode::Left) {
-                if new_j > 1 {
-                    new_j -= 1;
-                }
-            }
+    let mut direction = 0.0;
 
-            if keyboard_input.pressed(KeyCode::Right) {
-                if new_j < COLS - 4 - 1 {
-                    new_j += 1;
-                }
-            }
+    if keyboard_input.pressed(KeyCode::Left) {
+        direction = -1.0;
+    }
 
-            // check if the move successes
-            let block_matrix = BLOCKSLIB[block.type_id][block.shape_id];
-            let mut if_move = true;
-            for i in 0..4 {
-                for j in 0..4 {
-                    if block_matrix[i][j] == 1 && (screen.0)[new_i + i][new_j + j] == 1 {
-                        if_move = false;
-                        break;
-                    }
-                }
-                if !if_move {
-                    break;
-                }
-            }
+    if keyboard_input.pressed(KeyCode::Right) {
+        direction = 1.0;
+    }
 
-            // move if it is possible
-            if if_move {
-                block.i = new_i;
-                block.j = new_j;
+    let delta_seconds = time.delta_seconds();
+    block.real_x += 12.0 * block.velocity_x * delta_seconds * direction;
+
+    if block.real_x < 0.0 {
+        block.real_x = 0.0;
+    }
+
+    if block.real_x >= COLS as f32 - 4.0 - 1.0 {
+        block.real_x = COLS as f32 - 4.0 - 1.0 + 0.01;
+    }
+
+    let new_j = block.real_x as usize;
+
+    // check if the move successes
+    let block_matrix = BLOCKSLIB[block.type_id][block.shape_id];
+    let mut if_move = true;
+    for i in 0..4 {
+        for j in 0..4 {
+            if block_matrix[i][j] == 1 && (screen.0)[block.i + i][new_j + j] == 1 {
+                if_move = false;
+                break;
             }
         }
+        if !if_move {
+            break;
+        }
+    }
+
+    // move if it is possible
+    if if_move {
+        block.j = new_j;
     }
 }
 
@@ -670,6 +692,10 @@ fn pause_system(mut state: ResMut<State<AppState>>, keyboard_input: Res<Input<Ke
 fn scoreboard_system(scoreboard: Res<Scoreboard>, mut query: Query<&mut Text>) {
     let mut text = query.single_mut().unwrap();
     text.sections[1].value = scoreboard.score.to_string();
+}
+
+fn speed_adjustment_system(scoreboard: Res<Scoreboard>, mut speed: ResMut<Speed>) {
+    speed.0 += (scoreboard.score / 200) as f32;
 }
 
 struct ButtonMaterials {
