@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy::render::pass::ClearColor;
+use bevy_kira_audio::{Audio, AudioChannel, AudioPlugin, AudioSource};
 use rand::{thread_rng, Rng};
 
 // Static variables.
@@ -55,6 +56,7 @@ fn main() {
     // build app
     App::build()
         .add_plugins(DefaultPlugins)
+        .add_plugin(AudioPlugin)
         .init_resource::<ButtonMaterials>()
         .init_resource::<BackGroundMusicResources>()
         .add_state(AppState::Menu)
@@ -75,9 +77,7 @@ fn main() {
         .insert_resource(Scoreboard { score: 0 })
         .insert_resource(ClearColor(Color::rgb(0.9, 0.9, 0.9)))
         .add_startup_system(setup.system())
-        .add_startup_system(bgm_first_play_system.system())
-        .insert_resource(BgmTimer(Timer::from_seconds(71.0, true)))
-        .add_system(bgm_play_system.system())
+        .add_startup_system(bgm_loop_system.system())
         .add_system_set(SystemSet::on_enter(AppState::Menu).with_system(setup_menu.system()))
         .add_system_set(SystemSet::on_update(AppState::Menu).with_system(menu.system()))
         .add_system_set(SystemSet::on_exit(AppState::Menu).with_system(cleanup_menu.system()))
@@ -151,23 +151,11 @@ struct MenuData {
     button_entity: Entity,
 }
 
-fn bgm_first_play_system(    
+fn bgm_loop_system(
     audio: Res<Audio>,
-    bgm_audio: Res<BackGroundMusicResources>  
+    bgm_audio: Res<BackGroundMusicResources> 
 ) {
-    audio.play(bgm_audio.0.clone());
-}
-
-struct BgmTimer(Timer);
-fn bgm_play_system(    
-    time: Res<Time>,
-    mut timer: ResMut<BgmTimer>,
-    audio: Res<Audio>,
-    bgm_audio: Res<BackGroundMusicResources>
-) {
-    if timer.0.tick(time.delta()).just_finished() {
-        audio.play(bgm_audio.0.clone());
-    }
+   audio.play_looped_in_channel(bgm_audio.bgm_handle.clone(), &bgm_audio.channel);
 }
 
 fn setup(
@@ -838,12 +826,15 @@ impl FromWorld for ButtonMaterials {
     }
 }
 
-struct BackGroundMusicResources(Handle<AudioSource>);
+struct BackGroundMusicResources {
+    bgm_handle: Handle<AudioSource>,
+    channel: AudioChannel,
+}
 
 impl FromWorld for BackGroundMusicResources {
     fn from_world(world: &mut World) -> Self {
         let asset_server = world.get_resource_mut::<AssetServer>().unwrap();
         let audio = asset_server.load("bgm/default.mp3");
-        Self(audio)
+        Self { bgm_handle: audio, channel: AudioChannel::new("bgm".to_owned()) }
     }
 }
