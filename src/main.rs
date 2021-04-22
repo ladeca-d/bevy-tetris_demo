@@ -707,7 +707,7 @@ fn scoreboard_system(scoreboard: Res<Scoreboard>, mut query: Query<&mut Text>) {
 }
 
 fn speed_adjustment_system(scoreboard: Res<Scoreboard>, mut speed: ResMut<Speed>) {
-    speed.0 += (scoreboard.score / 200) as f32;
+    speed.0 = (scoreboard.score / 200 + 1) as f32 * 2.0;
 }
 
 struct OverMenuData {
